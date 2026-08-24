@@ -39,6 +39,7 @@
 	import TagSelector from '$lib/components/workspace/common/TagSelector.svelte';
 
 	import ModelItem from './ModelItem.svelte';
+	import { shouldAutoFocusModelSearch } from './selectorBehavior';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -79,6 +80,7 @@
 	let dropdownPosition = { top: 0, left: 0, maxHeight: undefined as number | undefined };
 	let positionFrame: number | undefined;
 	let settleTimers: number[] = [];
+	let openInputMethod: 'pointer' | 'keyboard' = 'pointer';
 
 	const portal = (node: HTMLElement) => {
 		document.body.appendChild(node);
@@ -173,16 +175,19 @@
 		schedulePositionUpdate();
 	};
 
-	const toggleOpen = async () => {
+	const toggleOpen = async (inputMethod: 'pointer' | 'keyboard' = 'pointer') => {
 		show = !show;
 		if (show) {
+			openInputMethod = inputMethod;
 			searchValue = '';
 			listScrollTop = 0;
 			resetView();
 			updatePosition();
 			await tick();
 			updatePosition();
-			window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
+			if (shouldAutoFocusModelSearch(openInputMethod)) {
+				window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
+			}
 		} else {
 			document.getElementById(`model-selector-${id}-button`)?.blur();
 		}
@@ -735,7 +740,13 @@
 		id="model-selector-{id}-button"
 		type="button"
 		{disabled}
-		on:click={toggleOpen}
+		on:click={() => toggleOpen('pointer')}
+		on:keydown={(event) => {
+			if ((event.key === 'Enter' || event.key === ' ') && !show) {
+				event.preventDefault();
+				toggleOpen('keyboard');
+			}
+		}}
 	>
 		<div
 			class="flex w-full min-w-0 text-left px-0.5 bg-transparent {triggerClassName} justify-between {($settings?.highContrastMode ??

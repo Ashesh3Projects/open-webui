@@ -92,7 +92,11 @@
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import TerminalMenu from './MessageInput/TerminalMenu.svelte';
 	import InlineIntegrationControls from './MessageInput/InlineIntegrationControls.svelte';
-	import { findReasoningEffortFilter } from './MessageInput/inlineIntegrations';
+	import {
+		findReasoningEffortFilter,
+		getIntegrationPresentation,
+		shouldShowIntegrationsMenu
+	} from './MessageInput/inlineIntegrations';
 	import Component from '../icons/Component.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
@@ -668,9 +672,19 @@
 	$: reasoningEffortFilter = findReasoningEffortFilter(toggleFilters);
 
 	let integrationsMenuFilters = [];
-	$: integrationsMenuFilters = toggleFilters.filter(
-		(filter) => filter.id !== reasoningEffortFilter?.id
-	);
+	$: integrationPresentation = getIntegrationPresentation($mobile);
+	$: integrationsMenuFilters = integrationPresentation.showCoreControlsInMenu
+		? toggleFilters
+		: toggleFilters.filter((filter) => filter.id !== reasoningEffortFilter?.id);
+	$: showIntegrationsMenu = shouldShowIntegrationsMenu({
+		showCoreControlsInMenu: integrationPresentation.showCoreControlsInMenu,
+		showWebSearchButton,
+		showImageGenerationButton,
+		showCodeInterpreterButton,
+		showToolsButton,
+		showSkillsButton,
+		filterCount: integrationsMenuFilters.length
+	});
 
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
@@ -1985,27 +1999,32 @@
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
-										<InlineIntegrationControls
-											reasoningFilter={reasoningEffortFilter}
-											bind:selectedFilterIds
-											canConfigureReasoning={$_user?.role === 'admin' ||
-												($_user?.permissions?.chat?.valves ?? true)}
-											{showWebSearchButton}
-											bind:webSearchEnabled
-											{showImageGenerationButton}
-											bind:imageGenerationEnabled
-											{showCodeInterpreterButton}
-											bind:codeInterpreterEnabled
-											{onWebSearchToggle}
-										/>
+										{#if integrationPresentation.showInlineControls}
+											<InlineIntegrationControls
+												reasoningFilter={reasoningEffortFilter}
+												bind:selectedFilterIds
+												canConfigureReasoning={$_user?.role === 'admin' ||
+													($_user?.permissions?.chat?.valves ?? true)}
+												{showWebSearchButton}
+												bind:webSearchEnabled
+												{showImageGenerationButton}
+												bind:imageGenerationEnabled
+												{showCodeInterpreterButton}
+												bind:codeInterpreterEnabled
+												{onWebSearchToggle}
+											/>
+										{/if}
 
-										{#if showToolsButton || showSkillsButton || (integrationsMenuFilters && integrationsMenuFilters.length > 0)}
+										{#if showIntegrationsMenu}
 											<IntegrationsMenu
 												selectedModels={selectedModelIds}
 												toggleFilters={integrationsMenuFilters}
-												showWebSearchButton={false}
-												showImageGenerationButton={false}
-												showCodeInterpreterButton={false}
+												showWebSearchButton={integrationPresentation.showCoreControlsInMenu &&
+													showWebSearchButton}
+												showImageGenerationButton={integrationPresentation.showCoreControlsInMenu &&
+													showImageGenerationButton}
+												showCodeInterpreterButton={integrationPresentation.showCoreControlsInMenu &&
+													showCodeInterpreterButton}
 												bind:selectedToolIds
 												bind:selectedSkillIds
 												bind:selectedFilterIds
@@ -2105,7 +2124,7 @@
 												</Tooltip>
 											{/if}
 
-											{#each selectedFilterIds.filter((filterId) => filterId !== reasoningEffortFilter?.id) as filterId (filterId)}
+											{#each selectedFilterIds.filter((filterId) => integrationPresentation.showCoreControlsInMenu || filterId !== reasoningEffortFilter?.id) as filterId (filterId)}
 												{@const filter = toggleFilters.find((f) => f.id === filterId)}
 												{#if filter}
 													<Tooltip content={filter?.name} placement="top">

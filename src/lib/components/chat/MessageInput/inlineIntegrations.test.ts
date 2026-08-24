@@ -5,6 +5,8 @@ import {
 	canCacheReasoningEffortLoad,
 	findReasoningEffortFilter,
 	getReasoningEffortValve,
+	getIntegrationPresentation,
+	shouldShowIntegrationsMenu,
 	setFilterEnabled
 } from './inlineIntegrations';
 
@@ -115,5 +117,48 @@ describe('canCacheReasoningEffortLoad', () => {
 				}
 			)
 		).toBe(true);
+	});
+});
+
+describe('getIntegrationPresentation', () => {
+	test('uses the legacy integrations menu on mobile and inline controls on wider screens', () => {
+		expect(getIntegrationPresentation(true)).toEqual({
+			showInlineControls: false,
+			showCoreControlsInMenu: true
+		});
+		expect(getIntegrationPresentation(false)).toEqual({
+			showInlineControls: true,
+			showCoreControlsInMenu: false
+		});
+	});
+});
+
+describe('shouldShowIntegrationsMenu', () => {
+	test('keeps the legacy button available on mobile when only core integrations exist', () => {
+		expect(
+			shouldShowIntegrationsMenu({
+				showCoreControlsInMenu: true,
+				showWebSearchButton: false,
+				showImageGenerationButton: true,
+				showCodeInterpreterButton: false,
+				showToolsButton: false,
+				showSkillsButton: false,
+				filterCount: 0
+			})
+		).toBe(true);
+	});
+
+	test('does not show an empty integrations button', () => {
+		expect(
+			shouldShowIntegrationsMenu({
+				showCoreControlsInMenu: true,
+				showWebSearchButton: false,
+				showImageGenerationButton: false,
+				showCodeInterpreterButton: false,
+				showToolsButton: false,
+				showSkillsButton: false,
+				filterCount: 0
+			})
+		).toBe(false);
 	});
 });

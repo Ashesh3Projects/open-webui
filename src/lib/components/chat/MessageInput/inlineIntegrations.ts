@@ -95,3 +95,31 @@ export const canApplyReasoningEffortUpdate = (
 
 export const canCacheReasoningEffortLoad = (loadedValves: unknown, spec: unknown) =>
 	loadedValves !== null && loadedValves !== undefined && getReasoningEffortValve(spec) !== null;
+
+export const getIntegrationPresentation = (isMobile: boolean) => ({
+	showInlineControls: !isMobile,
+	showCoreControlsInMenu: isMobile
+});
+
+export const shouldShowIntegrationsMenu = ({
+	showCoreControlsInMenu,
+	showWebSearchButton,
+	showImageGenerationButton,
+	showCodeInterpreterButton,
+	showToolsButton,
+	showSkillsButton,
+	filterCount
+}: {
+	showCoreControlsInMenu: boolean;
+	showWebSearchButton: boolean;
+	showImageGenerationButton: boolean;
+	showCodeInterpreterButton: boolean;
+	showToolsButton: boolean;
+	showSkillsButton: boolean;
+	filterCount: number;
+}) =>
+	showToolsButton ||
+	showSkillsButton ||
+	filterCount > 0 ||
+	(showCoreControlsInMenu &&
+		(showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton));
