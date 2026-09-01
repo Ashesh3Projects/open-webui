@@ -2,7 +2,11 @@ from langchain_core.documents import Document
 
 
 def test_safe_microsoft_web_iq_loader_forwards_custom_api_base_url(monkeypatch, tmp_path):
-    monkeypatch.setenv('DATA_DIR', str(tmp_path / 'data'))
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+    monkeypatch.setenv('DATA_DIR', str(data_dir))
+    monkeypatch.setenv('ENABLE_DB_MIGRATIONS', 'False')
+    monkeypatch.setenv('VECTOR_DB', 'external')
     monkeypatch.setenv(
         'WEBUI_SECRET_KEY',
         'test-only-secret-key-that-is-long-enough-for-pytest',
