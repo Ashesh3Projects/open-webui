@@ -56,14 +56,21 @@ async def fetch_openai_models(request: Request, user: UserModel = None):
 
 
 async def get_all_base_models(request: Request, user: UserModel = None):
-    config = await Config.get_many('openai.enable', 'ollama.enable')
+    config = await Config.get_many('openai.enable', 'ollama.enable', 'models.base_models_cache')
     openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
     ollama_task = fetch_ollama_models(request, user) if config.get('ollama.enable') else asyncio.sleep(0, result=[])
     function_task = get_function_models(request)
 
     openai_models, ollama_models, function_models = await asyncio.gather(openai_task, ollama_task, function_task)
 
-    return function_models + openai_models + ollama_models
+    base_models = function_models + openai_models + ollama_models
+    if base_models:
+        request.app.state.BASE_MODELS = base_models
+        redis = getattr(request.app.state, 'redis', None)
+        if redis is not None and config.get('models.base_models_cache'):
+            await redis.set(BASE_MODELS_CACHE_KEY, JSONCodec.dumps(base_models))
+
+    return base_models
 
 
 async def get_all_models(request, refresh: bool = False, user: UserModel = None):
@@ -98,11 +105,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
 
     if base_models is None:
         base_models = await get_all_base_models(request, user=user)
-        if base_models:
-            request.app.state.BASE_MODELS = base_models
-            if config.get('models.base_models_cache') and redis is not None:
-                await redis.set(BASE_MODELS_CACHE_KEY, JSONCodec.dumps(base_models))
-        else:
+        if not base_models:
             base_models = request.app.state.BASE_MODELS
 
     # deep copy the base models to avoid modifying the original list
@@ -187,6 +190,8 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
                     schema = get_chat_variables_schema(custom_model.params.model_dump().get('system'))
                     if schema:
                         model['info'].setdefault('meta', {})['chat_variables_schema'] = schema
+                    elif isinstance(model['info'].get('meta'), dict):
+                        model['info']['meta'].pop('chat_variables_schema', None)
 
                     action_ids = []
                     filter_ids = []
@@ -239,6 +244,8 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
             schema = get_chat_variables_schema(custom_model.params.model_dump().get('system'))
             if schema:
                 info.setdefault('meta', {})['chat_variables_schema'] = schema
+            elif isinstance(info.get('meta'), dict):
+                info['meta'].pop('chat_variables_schema', None)
             if 'params' in info:
                 # Remove params to avoid exposing sensitive info
                 del info['params']
@@ -438,7 +445,14 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
 
     log.debug('get_all_models() returned %s models', len(models))
 
-    models_dict = {model['id']: model for model in models}
+    models_dict = {}
+    for model in models:
+        model = model.copy()
+        if model.get('ollama'):
+            # Keep the moving expiry in the API response, outside the registry signature.
+            model['ollama'] = model['ollama'].copy()
+            model['ollama'].pop('expires_at', None)
+        models_dict[model['id']] = model
     if isinstance(request.app.state.MODELS, RedisDict):
         try:
             request.app.state.MODELS.set(models_dict)
@@ -461,12 +475,22 @@ async def check_model_access(user, model, model_info=None, db=None):
             access_grants=access_grants,
             db=db,
         ):
+            log.warning(
+                'Model access denied: user_id=%r model_id=%r reason=arena_read_denied',
+                user.id,
+                model.get('id'),
+            )
             raise Exception('Model not found')
     else:
         # Callers that already fetched the row (chat completion entry) pass it in
         if model_info is None or model_info.id != model.get('id'):
             model_info = await Models.get_model_by_id(model.get('id'), db=db)
         if not model_info:
+            log.warning(
+                'Model access denied: user_id=%r model_id=%r reason=model_unregistered',
+                user.id,
+                model.get('id'),
+            )
             raise Exception('Model not found')
 
         # One group-membership fetch shared by the direct check and every
@@ -486,6 +510,11 @@ async def check_model_access(user, model, model_info=None, db=None):
                 db=db,
             )
         ):
+            log.warning(
+                'Model access denied: user_id=%r model_id=%r reason=model_read_denied',
+                user.id,
+                model_info.id,
+            )
             raise Exception('Model not found')
 
         # Enforce access on chained base models
