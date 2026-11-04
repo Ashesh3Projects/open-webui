@@ -121,6 +121,13 @@ describe('canCacheReasoningEffortLoad', () => {
 });
 
 describe('getIntegrationPresentation', () => {
+	test('keeps controls in the desktop menu when their inline indicator is hidden', () => {
+		expect(getIntegrationPresentation(false, false)).toEqual({
+			showInlineControls: false,
+			showCoreControlsInMenu: true
+		});
+	});
+
 	test('uses the legacy integrations menu on mobile and inline controls on wider screens', () => {
 		expect(getIntegrationPresentation(true)).toEqual({
 			showInlineControls: false,

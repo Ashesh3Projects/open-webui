@@ -117,7 +117,7 @@ def test_fresh_base_discovery_updates_cached_picker_for_public_model(  # noqa: C
     async def get_function_valves_by_ids(function_ids):
         return {}
 
-    async def get_groups(user_id, db=None):
+    async def get_groups(user_id, db=None, include_inherited=False):
         return []
 
     async def get_accessible_resource_ids(**kwargs):
@@ -126,7 +126,7 @@ def test_fresh_base_discovery_updates_cached_picker_for_public_model(  # noqa: C
     monkeypatch.setattr(model_utils.Config, 'get_many', get_many)
     monkeypatch.setattr(model_utils, 'fetch_openai_models', fetch_openai_models)
     monkeypatch.setattr(model_utils, 'get_function_models', get_function_models)
-    monkeypatch.setattr(model_utils, 'ENABLE_PLUGINS', False)
+    monkeypatch.setattr(model_utils, 'ENABLE_FUNCTIONS', False)
     monkeypatch.setattr(model_utils.Models, 'get_all_models', get_saved_models)
     monkeypatch.setattr(model_utils.Functions, 'get_functions_by_ids', get_functions_by_ids)
     monkeypatch.setattr(model_utils.Functions, 'get_function_valves_by_ids', get_function_valves_by_ids)

@@ -96,9 +96,9 @@ export const canApplyReasoningEffortUpdate = (
 export const canCacheReasoningEffortLoad = (loadedValves: unknown, spec: unknown) =>
 	loadedValves !== null && loadedValves !== undefined && getReasoningEffortValve(spec) !== null;
 
-export const getIntegrationPresentation = (isMobile: boolean) => ({
-	showInlineControls: !isMobile,
-	showCoreControlsInMenu: isMobile
+export const getIntegrationPresentation = (isMobile: boolean, inlineVisible = true) => ({
+	showInlineControls: !isMobile && inlineVisible,
+	showCoreControlsInMenu: isMobile || !inlineVisible
 });
 
 export const shouldShowIntegrationsMenu = ({

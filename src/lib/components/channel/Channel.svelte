@@ -5,8 +5,10 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { v4 as uuidv4 } from 'uuid';
+	import type { Socket } from 'socket.io-client';
 
 	import {
+		config,
 		chatId,
 		channels,
 		channelId as _channelId,
@@ -20,6 +22,7 @@
 	import Messages from './Messages.svelte';
 	import MessageInput from './MessageInput.svelte';
 	import Navbar from './Navbar.svelte';
+	import { canUseEncryption, connected, enter, request } from '$lib/encryption/client';
 	import Drawer from '../common/Drawer.svelte';
 	import ResizableSidePanel from '../common/ResizableSidePanel.svelte';
 	import EllipsisVertical from '../icons/EllipsisVertical.svelte';
@@ -29,11 +32,64 @@
 
 	export let id = '';
 
+	let mounted = false;
+	let invitationSession: string | null = null;
+	let stopInvitation = () => {};
+	$: watchInvitation(
+		$socket,
+		channel?.id === id ? id : null,
+		mounted && canUseEncryption($user, $config?.features)
+	);
+
+	function watchInvitation(
+		connection: Socket | null,
+		channelId: string | null,
+		enabled: boolean | undefined
+	) {
+		stopInvitation();
+		stopInvitation = () => {};
+		invitationSession = null;
+		if (!enabled || !connection || !channelId) return;
+		let alive = true;
+		let revision = 0;
+		const receive = (event: { channel: string; session: string | null }) => {
+			if (event.channel === channelId) {
+				revision++;
+				invitationSession = event.session;
+			}
+		};
+		const clear = () => {
+			revision++;
+			invitationSession = null;
+		};
+		const query = () => {
+			if (!connected(connection)) return;
+			const issued = revision;
+			void request(connection, 'status', { channel: channelId })
+				.then((result) => {
+					if (alive && revision === issued)
+						invitationSession = result.available ? result.session : null;
+				})
+				.catch(() => {});
+		};
+		connection.on('encryption:available', receive);
+		connection.on('disconnect', clear);
+		connection.on('connect', query);
+		query();
+		stopInvitation = () => {
+			alive = false;
+			connection.off('encryption:available', receive);
+			connection.off('disconnect', clear);
+			connection.off('connect', query);
+		};
+	}
+
 	let currentId = null;
 
 	let scrollEnd = true;
 	let messagesContainerElement = null;
 	let chatInputElement = null;
+	let threadChatInputElement = null;
 
 	let top = false;
 
@@ -52,12 +108,15 @@
 
 	$: if (channel && $page.url.searchParams.get('thread')) {
 		threadId = $page.url.searchParams.get('thread');
-		window.history.replaceState(history.state, '', `/channels/${id}`);
+		if (!$page.url.searchParams.has('message')) {
+			window.history.replaceState(history.state, '', `/channels/${id}`);
+		}
 	}
 
 	const scrollToBottom = () => {
 		if (messagesContainerElement) {
-			messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
+			// The channel uses flex-col-reverse, whose bottom is scrollTop = 0.
+			messagesContainerElement.scrollTop = 0;
 		}
 	};
 
@@ -117,6 +176,7 @@
 		messages = null;
 		channel = null;
 		threadId = null;
+		replyToMessage = null;
 
 		typingUsers = [];
 		typingUsersTimeout = {};
@@ -147,18 +207,29 @@
 
 			if (type === 'message') {
 				if ((data?.parent_id ?? null) === null) {
-					const tempId = data?.temp_id ?? null;
-					messages = [
-						{ ...data, temp_id: null },
-						...messages.filter((m) => !tempId || m?.temp_id !== tempId)
-					];
+					const idx = (messages ?? []).findIndex(
+						(message) =>
+							message.id === data.id || (data.temp_id && message.temp_id === data.temp_id)
+					);
+					if (idx === -1) {
+						messages = [{ ...data, temp_id: null }, ...(messages ?? [])];
+					} else {
+						// Confirm the existing row without changing its position or render key.
+						const previous = messages[idx];
+						messages[idx] = {
+							...previous,
+							...data,
+							temp_id: null,
+							client_id: previous.client_id ?? previous.id
+						};
+					}
 
 					if (typingUsers.find((user) => user.id === event.user.id)) {
 						typingUsers = typingUsers.filter((user) => user.id !== event.user.id);
 					}
 
 					await tick();
-					if (scrollEnd) {
+					if (idx === -1 && scrollEnd) {
 						scrollToBottom();
 					}
 				}
@@ -166,7 +237,7 @@
 				const idx = messages.findIndex((message) => message.id === data.id);
 
 				if (idx !== -1) {
-					messages[idx] = data;
+					messages[idx] = { ...messages[idx], ...data };
 				}
 			} else if (type === 'message:delete') {
 				messages = messages
@@ -188,12 +259,12 @@
 				const idx = messages.findIndex((message) => message.id === data.id);
 
 				if (idx !== -1) {
-					messages[idx] = data;
+					messages[idx] = { ...messages[idx], ...data };
 				}
 			} else if (type.includes('message:reaction')) {
 				const idx = messages.findIndex((message) => message.id === data.id);
 				if (idx !== -1) {
-					messages[idx] = data;
+					messages[idx] = { ...messages[idx], ...data };
 				}
 			} else if (type === 'typing' && event.message_id === null) {
 				if (event.user.id === $user?.id) {
@@ -225,7 +296,17 @@
 		}
 	};
 
-	const submitHandler = async ({ content, data }) => {
+	const submitHandler = async ({
+		content,
+		data,
+		channel_id,
+		reply_to_message
+	}: {
+		content: string;
+		data: any;
+		channel_id: string;
+		reply_to_message: any;
+	}) => {
 		if (!content && (data?.files ?? []).length === 0) {
 			return;
 		}
@@ -236,7 +317,7 @@
 			temp_id: tempId,
 			content: content,
 			data: data,
-			reply_to_id: replyToMessage?.id ?? null
+			reply_to_id: reply_to_message?.id ?? null
 		};
 
 		const ts = Date.now() * 1000000; // nanoseconds
@@ -244,25 +325,23 @@
 			{
 				...message,
 				id: tempId,
+				client_id: tempId,
 				user_id: $user?.id,
 				user: $user,
-				reply_to_message: replyToMessage ?? null,
+				reply_to_message: reply_to_message ?? null,
 				created_at: ts,
 				updated_at: ts
 			},
 			...messages
 		];
 
-		const res = await sendMessage(localStorage.token, id, message).catch((error) => {
+		await tick();
+		if (id === channel_id) scrollToBottom();
+
+		await sendMessage(localStorage.token, channel_id, message).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
-
-		if (res) {
-			messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
-		}
-
-		replyToMessage = null;
 	};
 
 	const onChange = async () => {
@@ -289,19 +368,21 @@
 	};
 
 	onMount(() => {
+		mounted = true;
 		if ($chatId) {
 			chatId.set('');
 		}
 
 		$socket?.on('events:channel', channelEventHandler);
 
-		mediaQuery = window.matchMedia('(min-width: 1024px)');
+		mediaQuery = window.matchMedia('(min-width: 768px)');
 
 		mediaQuery.addEventListener('change', handleMediaQuery);
 		handleMediaQuery(mediaQuery);
 	});
 
 	onDestroy(() => {
+		stopInvitation();
 		// last read at
 		updateLastReadAt(id);
 		_channelId.set(null);
@@ -337,7 +418,7 @@
 <div
 	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
 		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ''} w-full max-w-full flex flex-col"
+		: ''} w-full max-w-full min-w-0 flex flex-col"
 	id="channel-container"
 >
 	<div class="w-full h-full flex">
@@ -350,7 +431,30 @@
 						return null;
 					});
 				}}
-			/>
+			>
+				<svelte:fragment slot="subtitle">
+					{#if invitationSession}
+						<div
+							class="flex flex-wrap items-center gap-x-1.5 text-[0.6875rem] font-normal text-gray-500 dark:text-gray-400"
+						>
+							<span>{$i18n.t('Encrypted chat in progress')}</span>
+							<span aria-hidden="true">·</span>
+							<button
+								type="button"
+								aria-label={$i18n.t('Join encrypted chat')}
+								class="text-[0.6875rem] font-normal text-gray-700 underline-offset-2 hover:underline dark:text-gray-200"
+								on:click={() => {
+									if (!invitationSession || !canUseEncryption($user, $config?.features)) return;
+									enter(id, { action: 'join', session: invitationSession });
+									void goto(`/channels/${encodeURIComponent(id)}/encrypted`);
+								}}
+							>
+								{$i18n.t('Join')}
+							</button>
+						</div>
+					{/if}
+				</svelte:fragment>
+			</Navbar>
 
 			{#if channel && messages !== null}
 				<div class="flex-1 overflow-y-auto">
@@ -366,15 +470,17 @@
 							<Messages
 								{channel}
 								{top}
-								{messages}
+								bind:messages
 								{replyToMessage}
 								onReply={async (message) => {
 									replyToMessage = message;
 									await tick();
 									chatInputElement?.focus();
 								}}
-								onThread={(id) => {
+								onThread={async (id) => {
 									threadId = id;
+									await tick();
+									threadChatInputElement?.focus();
 								}}
 								onPin={pinHandler}
 								onLoad={async () => {
@@ -396,9 +502,10 @@
 					</div>
 				</div>
 
-				<div class=" pb-[1rem] px-2.5">
+				<div class=" pb-3 px-3">
 					<MessageInput
 						id="root"
+						{messages}
 						bind:chatInputElement
 						bind:replyToMessage
 						{typingUsers}
@@ -428,6 +535,7 @@
 			{#if threadId !== null}
 				<Drawer
 					show={threadId !== null}
+					ariaLabel={$i18n.t('Thread')}
 					onClose={() => {
 						threadId = null;
 					}}
@@ -436,6 +544,7 @@
 						<Thread
 							{threadId}
 							{channel}
+							bind:chatInputElement={threadChatInputElement}
 							onPin={pinHandler}
 							onClose={() => {
 								threadId = null;
@@ -450,12 +559,14 @@
 				bind:width={threadPanelWidth}
 				minWidth={320}
 				maxWidth={640}
+				minSiblingWidth={360}
 				className="h-full"
 			>
-				<div class="h-full w-full shadow-xl">
+				<div class="h-full w-full border-l border-gray-100/60 dark:border-gray-800/40">
 					<Thread
 						{threadId}
 						{channel}
+						bind:chatInputElement={threadChatInputElement}
 						onPin={pinHandler}
 						onClose={() => {
 							threadId = null;
