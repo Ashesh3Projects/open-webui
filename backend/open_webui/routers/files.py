@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -46,12 +47,33 @@ from open_webui.routers.retrieval import ProcessFileForm, index_file, process_fi
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
+from open_webui.utils.chunked_uploads import ChunkedUploadStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+@asynccontextmanager
+async def chunk_upload_cleanup_lifespan(app):
+    async def cleanup():
+        while True:
+            try:
+                await asyncio.to_thread(CHUNKED_UPLOADS.cleanup_all)
+            except Exception:
+                log.exception('Failed to clean abandoned upload sessions')
+            await asyncio.sleep(3600)
+
+    task = asyncio.create_task(cleanup())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+router = APIRouter(lifespan=chunk_upload_cleanup_lifespan)
 
 
 from open_webui.utils.access_control.files import has_access_to_file
@@ -500,6 +522,94 @@ async def upload_file_handler(
                 else ERROR_MESSAGES.DEFAULT('Error uploading file')
             ),
         )
+
+
+CHUNKED_UPLOADS = ChunkedUploadStore(Path(UPLOAD_DIR) / '.chunks')
+
+
+class ChunkedUploadInitForm(BaseModel):
+    filename: str = Field(min_length=1)
+    size: int = Field(gt=0)
+    content_type: str = 'application/octet-stream'
+    metadata: dict | None = None
+    process: bool = True
+
+
+def _chunk_upload_error(error):
+    code = 404 if isinstance(error, FileNotFoundError) else 409 if isinstance(error, FileExistsError) else 400
+    return HTTPException(code, str(error) if code != 404 else 'Upload session not found')
+
+
+@router.post('/upload/init')
+async def init_chunked_upload(form_data: ChunkedUploadInitForm, user=Depends(get_verified_user)):
+    max_size = await Config.get('rag.file.max_size')
+    if max_size and form_data.size > int(max_size) * 1024 * 1024:
+        raise HTTPException(413, 'File exceeds the configured upload limit')
+    return await asyncio.to_thread(CHUNKED_UPLOADS.create, user.id, form_data.model_dump())
+
+
+@router.post('/upload/{upload_id}/chunk/{index}')
+async def upload_file_chunk(
+    upload_id: str, index: int, file: UploadFile = File(...), user=Depends(get_verified_user)
+):
+    try:
+        await asyncio.to_thread(CHUNKED_UPLOADS.write, user.id, upload_id, index, file.file)
+        return {'status': True}
+    except (ValueError, FileNotFoundError, FileExistsError) as error:
+        raise _chunk_upload_error(error)
+
+
+@router.post('/upload/{upload_id}/complete', response_model=FileModelResponse)
+async def complete_chunked_upload(
+    upload_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    claimed = False
+    assembled = None
+    try:
+        manifest = await asyncio.to_thread(CHUNKED_UPLOADS.claim, user.id, upload_id)
+        claimed = True
+        if 'result' in manifest:
+            return manifest['result']
+        assembled = await asyncio.to_thread(CHUNKED_UPLOADS.assemble, user.id, upload_id)
+        file = UploadFile(
+            file=assembled,
+            filename=manifest['filename'],
+            size=manifest['size'],
+            headers=Headers({'content-type': manifest['content_type']}),
+        )
+        result = await upload_file(
+            request=request,
+            background_tasks=background_tasks,
+            file=file,
+            metadata=manifest.get('metadata'),
+            process=manifest['process'],
+            process_in_background=True,
+            user=user,
+            db=db,
+        )
+        result = result if isinstance(result, dict) else result.model_dump(mode='json')
+        await asyncio.to_thread(CHUNKED_UPLOADS.complete, user.id, upload_id, result)
+        return result
+    except (ValueError, FileNotFoundError, FileExistsError) as error:
+        raise _chunk_upload_error(error)
+    finally:
+        if assembled is not None:
+            assembled.close()
+        if claimed:
+            await asyncio.to_thread(CHUNKED_UPLOADS.release, user.id, upload_id)
+
+
+@router.delete('/upload/{upload_id}')
+async def cancel_chunked_upload(upload_id: str, user=Depends(get_verified_user)):
+    try:
+        await asyncio.to_thread(CHUNKED_UPLOADS.cancel, user.id, upload_id)
+        return {'status': True}
+    except (ValueError, FileNotFoundError, FileExistsError) as error:
+        raise _chunk_upload_error(error)
 
 
 # List Files

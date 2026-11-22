@@ -1,6 +1,54 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { splitStream } from '$lib/utils';
 
+const UPLOAD_PART_SIZE = 64 * 1024 * 1024;
+
+const readUploadResponse = async (response: Response) => {
+	if (!response.ok) {
+		throw await response
+			.json()
+			.catch(() => ({ detail: `Upload failed (HTTP ${response.status})` }));
+	}
+	return response.json();
+};
+
+const uploadFileInParts = async (token: string, file: File, metadata, process: boolean) => {
+	const base = `${WEBUI_API_BASE_URL}/files/upload`;
+	const headers = { authorization: `Bearer ${token}` };
+	const session = await fetch(`${base}/init`, {
+		method: 'POST',
+		headers: { ...headers, 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			filename: file.name,
+			size: file.size,
+			content_type: file.type || 'application/octet-stream',
+			metadata,
+			process
+		})
+	}).then(readUploadResponse);
+	try {
+		const partSize = session.chunk_size;
+		if (!Number.isInteger(partSize) || partSize <= 0 || partSize > UPLOAD_PART_SIZE) {
+			throw new Error('Invalid upload part size');
+		}
+		for (let offset = 0, index = 0; offset < file.size; offset += partSize, index++) {
+			const body = new FormData();
+			body.append('file', file.slice(offset, offset + partSize), file.name);
+			await fetch(`${base}/${session.upload_id}/chunk/${index}`, {
+				method: 'POST',
+				headers,
+				body
+			}).then(readUploadResponse);
+		}
+		return await fetch(`${base}/${session.upload_id}/complete`, { method: 'POST', headers }).then(
+			readUploadResponse
+		);
+	} catch (error) {
+		await fetch(`${base}/${session.upload_id}`, { method: 'DELETE', headers }).catch(() => null);
+		throw error;
+	}
+};
+
 export const uploadFile = async (
 	token: string,
 	file: File,
@@ -22,23 +70,22 @@ export const uploadFile = async (
 
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			authorization: `Bearer ${token}`
-		},
-		body: data
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			error = err.detail || err.message;
-			console.error(err);
-			return null;
-		});
+	const request =
+		file.size > UPLOAD_PART_SIZE
+			? uploadFileInParts(token, file, metadata, process ?? true)
+			: fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
+					method: 'POST',
+					headers: {
+						Accept: 'application/json',
+						authorization: `Bearer ${token}`
+					},
+					body: data
+				}).then(readUploadResponse);
+	const res = await request.catch((err) => {
+		error = err.detail || err.message;
+		console.error(err);
+		return null;
+	});
 
 	if (error) {
 		throw error;
