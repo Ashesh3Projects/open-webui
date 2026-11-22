@@ -36,6 +36,8 @@
 
 	let enableFullContent = false;
 	let loading = false;
+	const isRawUpload = (file) =>
+		file?.context === 'raw' || file?.file?.meta?.data?.upload_mode === 'raw';
 
 	let isPDF = false;
 	let isAudio = false;
@@ -225,14 +227,14 @@
 				item.file = file || {};
 			}
 
-			// Load Excel content if it's an Excel file
-			if (isExcel) {
+			// Raw attachments stay as files; parsing large CSVs here can freeze the browser.
+			if (isExcel && !isRawUpload(item)) {
 				await loadExcelContent();
 			}
-			if (isDocx) {
+			if (isDocx && !isRawUpload(item)) {
 				await loadDocxContent();
 			}
-			if (isPptx) {
+			if (isPptx && !isRawUpload(item)) {
 				await loadPptxContent();
 			}
 
@@ -341,7 +343,7 @@
 						{/if}
 					</div>
 
-					{#if item?.context === 'raw' || item?.file?.meta?.data?.upload_mode === 'raw'}
+					{#if isRawUpload(item)}
 						<div class="self-end text-xs">{$i18n.t('Available in Python')}</div>
 					{:else if edit}
 						<div class=" self-end">
@@ -388,7 +390,11 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
+				{#if isRawUpload(item)}
+					<div class="px-1 pb-3 text-sm text-gray-500 dark:text-gray-400">
+						<code>/mnt/uploads/{item?.name}</code>
+					</div>
+				{:else if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
 					<div
 						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 					>
