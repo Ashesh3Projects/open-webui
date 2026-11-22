@@ -48,7 +48,7 @@ export const uploadFile = async (
 		onUploaded?.(res);
 	}
 
-	if (res && stream) {
+	if (res && stream && process !== false) {
 		const status = await getFileProcessStatus(token, res.id);
 
 		if (status && status.ok) {

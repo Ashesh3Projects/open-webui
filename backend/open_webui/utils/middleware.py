@@ -1725,7 +1725,15 @@ async def chat_completion_files_handler(
     __event_emitter__ = extra_params['__event_emitter__']
     sources = []
 
-    files = [item for item in (body.get('metadata', {}).get('files', None) or []) if item.get('type') != 'filesystem']
+    def is_raw_file(item):
+        metadata = ((item.get('file') or {}).get('meta') or {}).get('data') or {}
+        return item.get('context') == 'raw' or metadata.get('upload_mode') == 'raw'
+
+    files = [
+        item
+        for item in (body.get('metadata', {}).get('files', None) or [])
+        if item.get('type') != 'filesystem' and not is_raw_file(item)
+    ]
     if files:
         # Check if all files are in full context mode
         all_full_context = all(item.get('context') == 'full' for item in files)

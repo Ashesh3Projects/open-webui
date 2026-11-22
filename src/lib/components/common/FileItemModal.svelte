@@ -341,7 +341,9 @@
 						{/if}
 					</div>
 
-					{#if edit}
+					{#if item?.context === 'raw' || item?.file?.meta?.data?.upload_mode === 'raw'}
+						<div class="self-end text-xs">{$i18n.t('Available in Python')}</div>
+					{:else if edit}
 						<div class=" self-end">
 							<Tooltip
 								content={enableFullContent

@@ -72,6 +72,7 @@
 		isRasterImageContentType
 	} from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
+	import { getChatFileUploadOptions } from './MessageInput/fileUploads';
 	import { getCwd, uploadNewFileToTerminal } from '$lib/apis/terminal';
 	import { isSavedChatId } from '$lib/utils/chatId';
 	import { generateAutoCompletion } from '$lib/apis';
@@ -1193,6 +1194,17 @@
 
 		if (!isTemporary) {
 			try {
+				const uploadOptions = getChatFileUploadOptions(process, file.type, {
+					available: showCodeInterpreterButton,
+					engine: $config?.code?.interpreter_engine,
+					modelMetadata: selectedModelIds.map(
+						(id) => $models.find((model) => model.id === id)?.info?.meta ?? {}
+					)
+				});
+				if (uploadOptions.enablePython) {
+					fileItem.context = 'raw';
+					codeInterpreterEnabled = true;
+				}
 				// If the file is an audio file, provide the language for STT.
 				let metadata = null;
 				if (
@@ -1204,8 +1216,15 @@
 					};
 				}
 
-				// During the file upload, file content is automatically extracted.
-				const uploadedFile = await uploadFile(localStorage.token, file, metadata, process);
+				if (uploadOptions.context === 'raw') {
+					metadata = { ...metadata, upload_mode: 'raw' };
+				}
+				const uploadedFile = await uploadFile(
+					localStorage.token,
+					file,
+					metadata,
+					uploadOptions.process
+				);
 
 				if (uploadedFile) {
 					console.log('File upload completed:', {

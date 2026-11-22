@@ -42,7 +42,7 @@
 		desktopEvent
 	} from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
-	import { getFileBlobById, getFileContentById } from '$lib/apis/files';
+	import { getFileBlobById } from '$lib/apis/files';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { beforeNavigate } from '$app/navigation';
@@ -347,7 +347,7 @@
 					const fileId = file?.id;
 					const fileName = file?.filename || file?.name || 'file';
 					if (fileId) {
-						const content = await getFileContentById(fileId);
+						const content = await (await getFileBlobById(localStorage.token, fileId)).arrayBuffer();
 						if (content) {
 							filePayloads.push({ name: fileName, data: content });
 						}
