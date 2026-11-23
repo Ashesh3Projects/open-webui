@@ -28,7 +28,7 @@ class PublicModelOverride:
     params = ModelParams()
     meta = None
 
-    def model_dump(self):
+    def model_dump(self, **kwargs):
         return {
             'id': self.id,
             'name': self.name,
@@ -63,6 +63,7 @@ def request_with_cache(redis=None):
                 redis=redis,
                 MODELS={'old': model('old')},
                 BASE_MODELS=[model('old')],
+                BASE_MODELS_SNAPSHOT=None,
             )
         )
     )
@@ -207,3 +208,31 @@ def test_empty_base_discovery_keeps_last_nonempty_catalog(monkeypatch, model_uti
     assert request.app.state.BASE_MODELS == old_catalog
     if redis is not None:
         assert model_utils.JSONCodec.loads(redis.values[model_utils.BASE_MODELS_CACHE_KEY]) == old_catalog
+
+
+def test_fresh_admin_discovery_publishes_new_model_availability(monkeypatch, model_utils):
+    request = request_with_cache()
+    request.app.state.BASE_MODELS_SNAPSHOT = {'old': 'old'}
+    events = []
+
+    async def get_many(*keys):
+        return {'openai.enable': True, 'ollama.enable': False, 'models.base_models_cache': True}
+
+    async def discover(request, user=None):
+        return [model('old'), model('new')]
+
+    async def functions(request):
+        return []
+
+    async def publish(request, event, **kwargs):
+        events.append((event, kwargs['subject_id']))
+
+    monkeypatch.setattr(model_utils.Config, 'get_many', get_many)
+    monkeypatch.setattr(model_utils, 'fetch_openai_models', discover)
+    monkeypatch.setattr(model_utils, 'get_function_models', functions)
+    monkeypatch.setattr(model_utils, 'publish_event', publish)
+    asyncio.run(model_utils.get_all_base_models(request))
+    assert events == [(model_utils.EVENTS.MODEL_AVAILABLE, 'new')]
+    assert request.app.state.BASE_MODELS_SNAPSHOT == {'old': 'old', 'new': 'new'}
+    asyncio.run(model_utils.get_all_base_models(request))
+    assert events == [(model_utils.EVENTS.MODEL_AVAILABLE, 'new')]
