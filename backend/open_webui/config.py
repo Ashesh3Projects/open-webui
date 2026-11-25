@@ -469,6 +469,8 @@ CODE_INTERPRETER_PYODIDE_PROMPT = """
 
 - User-uploaded files are available at `/mnt/uploads/`. When the user asks you to work with their files, read from this directory.
 - You can also write output files to `/mnt/uploads/` so the user can access and download them from the file browser.
+- Save final deliverables in `/mnt/uploads/`; use `/tmp` for scratch work and temporary extraction files. Do not copy unchanged input files just to make them downloadable.
+- Newly created or updated files are published automatically after successful execution. When the tool returns `files`, use their `url` values as clickable download links; the user also gets a Download button in chat. These files are already attached, so do not call display_file for them. Never present a `/mnt/uploads/` path as a download link. If no file URL was returned, do not claim a file is available to download; check that it was written successfully or report publication failure.
 - The file system persists across code executions within the same session.
 - Use `import os; os.listdir('/mnt/uploads')` to discover available files."""
 

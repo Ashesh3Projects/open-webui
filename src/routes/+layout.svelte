@@ -44,6 +44,8 @@
 	import { refreshChatList, setChatTitle } from '$lib/stores/chatList';
 	import { clearFolderStates } from '$lib/stores/folderStates';
 	import { getFileBlobById } from '$lib/apis/files';
+	import { publishGeneratedFiles } from '$lib/pyodide/publishGeneratedFiles';
+	import { createPythonMessageQueue } from '$lib/pyodide/executionQueue';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { beforeNavigate } from '$app/navigation';
@@ -306,7 +308,29 @@
 		return worker;
 	};
 
-	const executePythonAsWorker = async (id, code, cb, files = []) => {
+	const enqueuePythonExecution = createPythonMessageQueue();
+	const executePythonAsWorker = (id, code, cb, files = []) => {
+		const executionToken = localStorage.token;
+		const executionUserId = $user?.id;
+		void enqueuePythonExecution(
+			() =>
+				new Promise((resolve) => {
+					const finish = (output) => {
+						try {
+							cb?.(output);
+						} finally {
+							resolve(undefined);
+						}
+					};
+					executePythonAsWorkerNow(id, code, finish, files, executionToken, executionUserId).catch(
+						(error) => finish({ stdout: null, stderr: String(error), result: null, files: [] })
+					);
+				})
+		);
+	};
+	const executePythonAsWorkerNow = async (id, code, cb, files, executionToken, executionUserId) => {
+		if (!executionUserId || $user?.id !== executionUserId)
+			throw new Error('Python request canceled because the signed-in account changed.');
 		let result = null;
 		let stdout = null;
 		let stderr = null;
@@ -342,7 +366,7 @@
 					const fileId = file?.id;
 					const fileName = file?.filename || file?.name || 'file';
 					if (fileId) {
-						const content = await (await getFileBlobById(localStorage.token, fileId)).arrayBuffer();
+						const content = await (await getFileBlobById(executionToken, fileId)).arrayBuffer();
 						if (content) {
 							filePayloads.push({ name: fileName, data: content });
 						}
@@ -389,7 +413,7 @@
 		}, 60000);
 
 		// Use addEventListener so multiple concurrent executions don't clobber each other
-		const onMessage = (event) => {
+		const onMessage = async (event) => {
 			const { id: eventId, ...data } = event.data;
 			// Only handle responses for this execution ID
 			if (eventId !== id) return;
@@ -404,6 +428,20 @@
 			data['stdout'] && (stdout = data['stdout']);
 			data['stderr'] && (stderr = data['stderr']);
 			data['result'] && (result = data['result']);
+			executing = false;
+			if ($user?.id !== executionUserId) {
+				worker.terminate();
+				if ($pyodideWorker === worker) pyodideWorker.set(null);
+				cb?.({
+					stdout: null,
+					stderr: 'Output publication canceled because the signed-in account changed.',
+					result: null,
+					files: []
+				});
+				return;
+			}
+			const published = await publishGeneratedFiles(executionToken, data.generatedFiles || []);
+			published.file_errors.push(...(data.file_errors || []));
 
 			if (cb) {
 				cb(
@@ -412,7 +450,8 @@
 							{
 								stdout: stdout,
 								stderr: stderr,
-								result: result
+								result: result,
+								...published
 							},
 							(_key, value) => (typeof value === 'bigint' ? value.toString() : value)
 						)

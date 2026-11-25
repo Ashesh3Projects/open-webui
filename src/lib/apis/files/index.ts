@@ -12,11 +12,18 @@ const readUploadResponse = async (response: Response) => {
 	return response.json();
 };
 
-const uploadFileInParts = async (token: string, file: File, metadata, process: boolean) => {
+const uploadFileInParts = async (
+	token: string,
+	file: File,
+	metadata,
+	process: boolean,
+	signal?: AbortSignal
+) => {
 	const base = `${WEBUI_API_BASE_URL}/files/upload`;
 	const headers = { authorization: `Bearer ${token}` };
 	const session = await fetch(`${base}/init`, {
 		method: 'POST',
+		signal,
 		headers: { ...headers, 'Content-Type': 'application/json' },
 		body: JSON.stringify({
 			filename: file.name,
@@ -36,15 +43,22 @@ const uploadFileInParts = async (token: string, file: File, metadata, process: b
 			body.append('file', file.slice(offset, offset + partSize), file.name);
 			await fetch(`${base}/${session.upload_id}/chunk/${index}`, {
 				method: 'POST',
+				signal,
 				headers,
 				body
 			}).then(readUploadResponse);
 		}
-		return await fetch(`${base}/${session.upload_id}/complete`, { method: 'POST', headers }).then(
-			readUploadResponse
-		);
+		return await fetch(`${base}/${session.upload_id}/complete`, {
+			method: 'POST',
+			headers,
+			signal
+		}).then(readUploadResponse);
 	} catch (error) {
-		await fetch(`${base}/${session.upload_id}`, { method: 'DELETE', headers }).catch(() => null);
+		await fetch(`${base}/${session.upload_id}`, {
+			method: 'DELETE',
+			headers,
+			signal: AbortSignal.timeout(5000)
+		}).catch(() => null);
 		throw error;
 	}
 };
@@ -55,7 +69,8 @@ export const uploadFile = async (
 	metadata?: object | null,
 	process?: boolean | null,
 	stream: boolean = true,
-	onUploaded?: (uploadedFile: { id: string }) => void
+	onUploaded?: (uploadedFile: { id: string }) => void,
+	signal?: AbortSignal
 ) => {
 	const data = new FormData();
 	data.append('file', file);
@@ -72,9 +87,10 @@ export const uploadFile = async (
 
 	const request =
 		file.size > UPLOAD_PART_SIZE
-			? uploadFileInParts(token, file, metadata, process ?? true)
+			? uploadFileInParts(token, file, metadata, process ?? true, signal)
 			: fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
 					method: 'POST',
+					signal,
 					headers: {
 						Accept: 'application/json',
 						authorization: `Bearer ${token}`

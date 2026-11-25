@@ -56,6 +56,7 @@
 	import ContextCompactionLabel from './ContextCompactionLabel.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
+	import ToolOutputFile from './ToolOutputFile.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -77,7 +78,17 @@
 		content: string;
 		output?: OutputItem[];
 		contextSummary?: string;
-		files?: { type: string; url: string }[];
+		files?: {
+			type: string;
+			url: string;
+			id?: string;
+			name?: string;
+			size?: number;
+			content_type?: string;
+			generated_by?: string;
+			path?: string;
+			source?: string;
+		}[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
@@ -747,8 +758,10 @@
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
 								{#each message.files.filter( (f) => ['image', 'video', 'file'].includes(f.type) ) as file}
-									<div>
-										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+									<div class:w-full={file.generated_by === 'code_interpreter'}>
+										{#if file.generated_by === 'code_interpreter'}
+											<ToolOutputFile item={file} {chatId} expanded={false} />
+										{:else if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											<Image src={file.url} alt={file.name || $i18n.t('Generated Image')} />
 										{:else if file.type === 'video' || (file?.content_type ?? '').startsWith('video/')}
 											<!-- svelte-ignore a11y-media-has-caption -->

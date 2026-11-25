@@ -1,4 +1,6 @@
 import { loadPyodide, type PyodideInterface } from 'pyodide';
+import { createGeneratedFileTracker } from '$lib/pyodide/generatedFiles';
+import { createPythonMessageQueue } from '$lib/pyodide/executionQueue';
 
 declare global {
 	interface Window {
@@ -182,6 +184,9 @@ async function executeCode(
 		fsUploadFiles(files);
 		persistFS();
 	}
+	const tracker = createGeneratedFileTracker(self.pyodide.FS);
+	const before = tracker.snapshot();
+	let succeeded = false;
 
 	try {
 		// Install the plotting hook when the source mentions matplotlib and the package is loaded.
@@ -217,6 +222,7 @@ matplotlib.pyplot.show = show`);
 
 		// Safely process and recursively serialize the result
 		self.result = processResult(self.result);
+		succeeded = true;
 
 		console.log('Python result:', self.result);
 
@@ -226,12 +232,29 @@ matplotlib.pyplot.show = show`);
 		self.stderr = error instanceof Error ? error.message : String(error);
 	}
 
-	self.postMessage({ id, result: self.result, stdout: self.stdout, stderr: self.stderr });
+	let generatedFiles = [];
+	const file_errors: string[] = [];
+	try {
+		if (succeeded) generatedFiles = tracker.collect(before);
+	} catch (error) {
+		file_errors.push(`Could not read Python output files: ${String(error)}`);
+	}
+	self.postMessage(
+		{
+			id,
+			result: self.result,
+			stdout: self.stdout,
+			stderr: self.stderr,
+			generatedFiles,
+			file_errors
+		},
+		{ transfer: generatedFiles.map((file) => file.data) }
+	);
 }
 
 // Message handler
 
-self.onmessage = async (event) => {
+const handlePythonMessage = async (event: MessageEvent) => {
 	const data = event.data;
 	const { id, type } = data;
 
@@ -299,11 +322,12 @@ self.onmessage = async (event) => {
 
 		case 'fs:sync': {
 			// Re-read from IndexedDB into memory to pick up externally written files
-			(self.pyodide.FS as any).syncfs(true, (err: Error | null) => {
-				if (err) {
-					console.error('Error syncing from IndexedDB:', err);
-				}
-				self.postMessage({ id, type: 'fs:sync', success: !err });
+			await new Promise<void>((resolve) => {
+				(self.pyodide.FS as any).syncfs(true, (err: Error | null) => {
+					if (err) console.error('Error syncing from IndexedDB:', err);
+					self.postMessage({ id, type: 'fs:sync', success: !err });
+					resolve();
+				});
 			});
 			break;
 		}
@@ -311,6 +335,18 @@ self.onmessage = async (event) => {
 		default:
 			console.warn('Unknown message type:', type);
 	}
+};
+
+const enqueuePythonMessage = createPythonMessageQueue();
+self.onmessage = (event) => {
+	void enqueuePythonMessage(() => handlePythonMessage(event)).catch((error) => {
+		self.postMessage({
+			id: event.data.id,
+			type: event.data.type?.startsWith('fs:') ? event.data.type : undefined,
+			error: String(error),
+			stderr: String(error)
+		});
+	});
 };
 
 // Helpers

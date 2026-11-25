@@ -776,7 +776,7 @@ async def execute_code(
     or run any Python code that would help answer the user's question.
 
     :param code: The Python code to execute
-    :return: JSON with stdout, stderr, and result from execution
+    :return: JSON with stdout, stderr, result, and generated files with download URLs. Published files are already attached in chat.
     """
     from uuid import uuid4
 
@@ -915,6 +915,17 @@ async def execute_code(
             'stderr': stderr,
             'result': result,
         }
+
+        if engine == 'pyodide' and isinstance(output, dict) and __user__:
+            from open_webui.utils.code_artifacts import resolve_code_output_files
+
+            published = await resolve_code_output_files(output.get('files'), __user__.get('id'))
+            if published:
+                response['files'] = published
+                if __event_emitter__:
+                    await __event_emitter__({'type': 'files', 'data': {'files': published}})
+            if output.get('file_errors'):
+                response['file_errors'] = output['file_errors']
 
         return JSONCodec.dumps(response, ensure_ascii=False)
     except Exception as e:

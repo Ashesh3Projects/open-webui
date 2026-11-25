@@ -16,7 +16,7 @@
 		terminalServers
 	} from '$lib/stores';
 	import { downloadFileBlob, downloadFilePreview, readFile } from '$lib/apis/terminal';
-	import { getFileContentById } from '$lib/apis/files';
+	import { getFileBlobById } from '$lib/apis/files';
 	import FilePreview from '$lib/components/chat/FileNav/FilePreview.svelte';
 	import Icon from '$lib/components/chat/FileNav/Icon.svelte';
 	import { fileIconName } from '$lib/components/chat/FileNav/fileIcon';
@@ -28,7 +28,7 @@
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	let expanded = true;
+	export let expanded = true;
 	let loading = false;
 	let loadedKey = '';
 	let error = '';
@@ -117,10 +117,8 @@
 
 	async function blobForPreview() {
 		if (fileId) {
-			const data = await getFileContentById(fileId).catch(() => null);
-			return data
-				? { blob: new Blob([data], { type: item?.content_type ?? '' }), filename: name }
-				: null;
+			const data = await getFileBlobById(localStorage.token, fileId).catch(() => null);
+			return data ? { blob: data, filename: name } : null;
 		}
 		if (!terminal) return null;
 		return downloadFileBlob(terminal, path);

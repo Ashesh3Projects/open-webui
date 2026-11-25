@@ -1,9 +1,14 @@
+import { createGeneratedFileTracker } from './generatedFiles';
+import { createPythonMessageQueue } from './executionQueue';
+
 type MessageListener = (event: MessageEvent) => void;
 type ErrorListener = (event: Event) => void;
 type QueuedMessage = { message: unknown; transfer: Transferable[] };
 
 const sandboxScript = String.raw`
 (function () {
+	const createFileTracker = (${createGeneratedFileTracker.toString()});
+	const enqueue = (${createPythonMessageQueue.toString()})();
 	let pyodide = null;
 	let pyodideReady = null;
 	let stdout = null;
@@ -136,19 +141,28 @@ const sandboxScript = String.raw`
 		stderr = null;
 		let result = null;
 		if (files && files.length > 0) upload(files);
+		const tracker = createFileTracker(pyodide.FS);
+		const before = tracker.snapshot();
+		let succeeded = false;
 		try {
 			if (code.includes('matplotlib') && 'matplotlib' in pyodide.loadedPackages) await patchMatplotlib();
 			result = clean(await pyodide.runPythonAsync(code));
+			succeeded = true;
 		} catch (error) {
 			stderr = error && error.message ? error.message : String(error);
 		}
-		post({ id: id, result: result, stdout: stdout, stderr: stderr });
+		let generatedFiles = [];
+		const file_errors = [];
+		try { if (succeeded) generatedFiles = tracker.collect(before); }
+		catch (error) { file_errors.push('Could not read Python output files: ' + String(error)); }
+		post({ id: id, result: result, stdout: stdout, stderr: stderr, generatedFiles: generatedFiles, file_errors: file_errors }, generatedFiles.map(function(file) { return file.data; }));
 	}
 
-	window.addEventListener('message', async function (event) {
+	window.addEventListener('message', function (event) {
 		if (event.source !== parent) return;
 		const data = event.data || {};
 		const id = data.id;
+		enqueue(async function () {
 		try {
 			if (!data.type || data.type === 'execute') {
 				await ensureRuntime(data.packages || []);
@@ -187,6 +201,7 @@ const sandboxScript = String.raw`
 		} catch (error) {
 			post({ id: id, stderr: error && error.message ? error.message : String(error) });
 		}
+		});
 	});
 })();
 `;
