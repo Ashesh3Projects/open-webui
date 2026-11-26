@@ -98,8 +98,7 @@ def test_fresh_base_discovery_updates_cached_picker_for_public_model(  # noqa: C
             'openai.enable': True,
             'ollama.enable': False,
             'models.base_models_cache': True,
-            'evaluation.arena.enable': False,
-            'evaluation.arena.models': [],
+            'router.models': [],
             'models.default_metadata': {},
         }
 
@@ -187,8 +186,7 @@ def test_empty_base_discovery_keeps_last_nonempty_catalog(monkeypatch, model_uti
             'openai.enable': True,
             'ollama.enable': False,
             'models.base_models_cache': True,
-            'evaluation.arena.enable': False,
-            'evaluation.arena.models': [],
+            'router.models': [],
             'models.default_metadata': {},
         }
 

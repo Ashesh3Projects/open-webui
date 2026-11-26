@@ -16,6 +16,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import { getChatContext } from '$lib/components/chat/context';
+	import { firstNameOf, getGreeting } from '$lib/utils/greeting';
 
 	const { models: _models, temporary } = getChatContext();
 
@@ -37,12 +38,16 @@
 		selectedModelIdx = models.length - 1;
 	}
 
-	$: models = modelIds.map((id) => $_models.find((m) => m.id === id));
+	$: models = modelIds.map((id) => ($_models ?? []).find((m) => m.id === id));
 	$: selectedModel = atSelectedModel ?? models[selectedModelIdx];
 	$: selectedModelName = resolveLocalizedModelName(selectedModel, $i18n.language);
 	$: selectedModelDescription =
 		$config?.license_metadata?.chat_placeholder_description ||
 		resolveLocalizedModelDescription(selectedModel, $i18n.language);
+	// Time-of-day greeting, unless the model (or license) gives the placeholder a description.
+	$: firstName = firstNameOf($user?.name);
+	$: showGreeting = !!firstName && !selectedModelDescription;
+	$: greeting = getGreeting((key, options) => $i18n.t(key, options), firstName);
 
 	onMount(() => {
 		mounted = true;
@@ -51,7 +56,7 @@
 
 {#key mounted}
 	<div class="m-auto w-full max-w-[58rem] px-8 lg:px-20">
-		<div class="flex justify-start">
+		<div class="flex justify-start" class:hidden={showGreeting}>
 			<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 200 }}>
 				{#each models as model, modelIdx}
 					<button
@@ -74,8 +79,8 @@
 							placement="right"
 						>
 							<img
-								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-								class=" size-[2.7rem] rounded-full"
+								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&v=${model?.info?.updated_at}`}
+								class=" size-[2.7rem] rounded-2xl"
 								alt=""
 								draggable="false"
 								on:error={(e) => {
@@ -97,18 +102,20 @@
 				className="w-full flex justify-start mb-0.5"
 				placement="top"
 			>
-				<div class="flex items-center gap-1.5 text-gray-500 text-xs mt-1 w-fit">
+				<div class="flex items-center gap-1.5 text-base-500 text-xs mt-1 w-fit">
 					<EyeSlash strokeWidth="2" className="size-3.5" />{$i18n.t('Temporary Chat')}
 				</div>
 			</Tooltip>
 		{/if}
 
 		<div
-			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 text-left flex items-center gap-4"
+			class=" mt-2 mb-4 text-3xl text-base-800 dark:text-base-100 text-left flex items-center gap-4"
 		>
 			<div>
-				<h2 class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
-					{#if selectedModelName}
+				<h2 class="line-clamp-1" class:capitalize={!showGreeting} in:fade={{ duration: 200 }}>
+					{#if showGreeting}
+						{greeting}
+					{:else if selectedModelName}
 						{selectedModelName}
 					{:else}
 						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
@@ -118,7 +125,7 @@
 				<div in:fade={{ duration: 200, delay: 200 }}>
 					{#if selectedModelDescription}
 						<div
-							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
+							class="mt-0.5 text-base font-normal text-base-500 dark:text-base-400 line-clamp-3 markdown"
 						>
 							{@html DOMPurify.sanitize(
 								marked.parse(
@@ -127,7 +134,7 @@
 							)}
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user && (!models[selectedModelIdx]?.info?.meta?.user.community || $config?.features.enable_community_sharing)}
-							<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
+							<div class="mt-0.5 text-sm font-normal text-base-400 dark:text-base-500">
 								{$i18n.t('By')}
 								{#if models[selectedModelIdx]?.info?.meta?.user.community}
 									<a
@@ -143,7 +150,7 @@
 							</div>
 						{/if}
 					{:else}
-						<div class=" text-gray-400 dark:text-gray-500 line-clamp-1 font-p">
+						<div class=" text-base-400 dark:text-base-500 line-clamp-1 font-p">
 							{$i18n.t('How can I help you today?')}
 						</div>
 					{/if}
