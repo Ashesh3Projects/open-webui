@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { config } from '$lib/stores';
 import { checkSourceSize, readSourceResponse } from './sourceText';
+import { UPLOAD_PART_SIZE, uploadFileInParts } from '../chunkedUpload';
 // The same attachment is used by @mentions, machine uploads, and Files-pane requests.
 export type FilesystemFile = {
 	type: 'filesystem';
@@ -548,6 +549,17 @@ export const uploadToMachine = async (
 	directory: string,
 	file: File
 ): Promise<{ path: string; size: number } | null> => {
+	if (file.size > UPLOAD_PART_SIZE) {
+		return uploadFileInParts(
+			`${target.baseUrl.replace(/\/$/, '')}/files/upload`,
+			machineHeaders(target),
+			file,
+			{ directory }
+		).catch((error) => {
+			console.error('open-terminal uploadToMachine error:', error);
+			return null;
+		});
+	}
 	const url = `${target.baseUrl.replace(/\/$/, '')}/files/upload?directory=${encodeURIComponent(directory)}`;
 	const body = new FormData();
 	body.append('file', file);

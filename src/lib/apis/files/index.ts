@@ -1,67 +1,7 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { splitStream } from '$lib/utils';
 
-const UPLOAD_PART_SIZE = 64 * 1024 * 1024;
-
-const readUploadResponse = async (response: Response) => {
-	if (!response.ok) {
-		throw await response
-			.json()
-			.catch(() => ({ detail: `Upload failed (HTTP ${response.status})` }));
-	}
-	return response.json();
-};
-
-const uploadFileInParts = async (
-	token: string,
-	file: File,
-	metadata,
-	process: boolean,
-	signal?: AbortSignal
-) => {
-	const base = `${WEBUI_API_BASE_URL}/files/upload`;
-	const headers = { authorization: `Bearer ${token}` };
-	const session = await fetch(`${base}/init`, {
-		method: 'POST',
-		signal,
-		headers: { ...headers, 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			filename: file.name,
-			size: file.size,
-			content_type: file.type || 'application/octet-stream',
-			metadata,
-			process
-		})
-	}).then(readUploadResponse);
-	try {
-		const partSize = session.chunk_size;
-		if (!Number.isInteger(partSize) || partSize <= 0 || partSize > UPLOAD_PART_SIZE) {
-			throw new Error('Invalid upload part size');
-		}
-		for (let offset = 0, index = 0; offset < file.size; offset += partSize, index++) {
-			const body = new FormData();
-			body.append('file', file.slice(offset, offset + partSize), file.name);
-			await fetch(`${base}/${session.upload_id}/chunk/${index}`, {
-				method: 'POST',
-				signal,
-				headers,
-				body
-			}).then(readUploadResponse);
-		}
-		return await fetch(`${base}/${session.upload_id}/complete`, {
-			method: 'POST',
-			headers,
-			signal
-		}).then(readUploadResponse);
-	} catch (error) {
-		await fetch(`${base}/${session.upload_id}`, {
-			method: 'DELETE',
-			headers,
-			signal: AbortSignal.timeout(5000)
-		}).catch(() => null);
-		throw error;
-	}
-};
+import { UPLOAD_PART_SIZE, readUploadResponse, uploadFileInParts } from '../chunkedUpload';
 
 export const uploadFile = async (
 	token: string,
@@ -87,7 +27,13 @@ export const uploadFile = async (
 
 	const request =
 		file.size > UPLOAD_PART_SIZE
-			? uploadFileInParts(token, file, metadata, process ?? true, signal)
+			? uploadFileInParts(
+					`${WEBUI_API_BASE_URL}/files/upload`,
+					{ authorization: `Bearer ${token}` },
+					file,
+					{ metadata, process: process ?? true },
+					signal
+				)
 			: fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
 					method: 'POST',
 					signal,

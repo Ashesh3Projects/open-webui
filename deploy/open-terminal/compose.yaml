@@ -1,0 +1,33 @@
+services:
+  general:
+    # Standard full-toolkit image; model inference comes from Open WebUI.
+    image: ghcr.io/open-webui/open-terminal@sha256:b8cc2eb710981c2ee907162e8a0e015febb74cabae8db83464b8fd9e1dd0a24b
+    container_name: open-terminal-general
+    restart: unless-stopped
+    environment:
+      OPEN_TERMINAL_API_KEY: ${OPEN_TERMINAL_API_KEY:?Set a private machine API key}
+      OPEN_TERMINAL_MULTI_USER: 'false'
+    cpus: 2
+    mem_limit: 4g
+    shm_size: 1g
+    volumes:
+      - general-home:/home/user
+    networks:
+      machines:
+        aliases:
+          - open-terminal-general
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=5)']
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  general-home:
+    name: open-terminal-general-data
+
+networks:
+  machines:
+    external: true
+    name: open-webui-machines

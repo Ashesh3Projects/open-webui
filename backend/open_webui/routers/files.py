@@ -66,6 +66,8 @@ async def chunk_upload_cleanup_lifespan(app):
         while True:
             try:
                 await asyncio.to_thread(CHUNKED_UPLOADS.cleanup_all)
+                from open_webui.utils.machine_uploads import MACHINE_UPLOADS
+                await asyncio.to_thread(MACHINE_UPLOADS.cleanup_all)
             except Exception:
                 log.exception('Failed to clean abandoned upload sessions')
             await asyncio.sleep(3600)

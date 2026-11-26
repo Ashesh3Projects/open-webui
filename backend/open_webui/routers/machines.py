@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSoc
 from fastapi.responses import JSONResponse, StreamingResponse
 from multidict import CIMultiDict
 from open_webui.config import MACHINE_PROXY_HEADERS
+from open_webui.utils.machine_uploads import handle_machine_upload
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, ENABLE_TOOL_SERVERS
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.groups import Groups
@@ -567,20 +568,30 @@ async def proxy_machine(
     request: Request,
     user=Depends(get_verified_user),
 ):
+    context = {
+        'instance_user_id': request.headers.get('x-terminal-user-id'),
+        'chat_id': request.path_params.get('chat_id') or request.headers.get('x-session-id'),
+        'model_id': request.headers.get('x-terminal-model-id'),
+    }
+    if path.startswith('files/upload/'):
+        if not ENABLE_TOOL_SERVERS:
+            raise HTTPException(403, 'Tool servers are disabled')
+        connection = await find_machine_connection(user, server_id, context, request=request)
+        if connection is None:
+            raise HTTPException(404, 'Machine not found')
+        if not get_machine_url(connection):
+            raise HTTPException(503, 'Machine URL not configured')
+        return await handle_machine_upload(server_id, path, request, user, context=context, forward=_proxy_machine)
     return await _proxy_machine(
         server_id,
         path,
         request,
         user,
-        context={
-            'instance_user_id': request.headers.get('x-terminal-user-id'),
-            'chat_id': request.path_params.get('chat_id') or request.headers.get('x-session-id'),
-            'model_id': request.headers.get('x-terminal-model-id'),
-        },
+        context=context,
     )
 
 
-async def _proxy_machine(server_id, path, request, user, *, context, browser_auth=None):
+async def _proxy_machine(server_id, path, request, user, *, context, browser_auth=None, upload=None):
     if not ENABLE_TOOL_SERVERS:
         return JSONResponse({'error': 'Tool servers are disabled'}, status_code=403)
 
@@ -608,7 +619,9 @@ async def _proxy_machine(server_id, path, request, user, *, context, browser_aut
     ):
         return JSONResponse({'error': 'Path not allowed'}, status_code=403)
 
-    if request.query_params:
+    if upload is not None:
+        target_url += f'?directory={quote(upload["directory"], safe="")}'
+    elif request.query_params:
         target_url += f'?{request.query_params}'
 
     headers = {'X-User-Id': user.id}
@@ -684,6 +697,10 @@ async def _proxy_machine(server_id, path, request, user, *, context, browser_aut
     try:
         has_body = 'content-length' in request.headers or 'transfer-encoding' in request.headers
         body = request.stream() if has_body else None
+        if upload is not None:
+            body = aiohttp.FormData()
+            body.add_field('file', upload['file'], filename=upload['filename'], content_type=upload['content_type'])
+            headers.pop('Content-Type', None)
 
         upstream_response = await session.request(
             method=request.method,
