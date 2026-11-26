@@ -218,9 +218,13 @@
 			</div>
 		</ConsecutiveDetailsGroup>
 	{:else if displayItem.type === 'file'}
-		{#if displayItem.item?.displayed || ($settings?.machineFileDisplay ?? $settings?.terminalFileDisplay) === 'inline'}
-			<ToolOutputFile item={displayItem.item} {chatId} modelId={model?.id ?? null} />
-		{/if}
+		<ToolOutputFile
+			item={displayItem.item}
+			{chatId}
+			modelId={model?.id ?? null}
+			expanded={!!displayItem.item?.displayed ||
+				($settings?.machineFileDisplay ?? $settings?.terminalFileDisplay) === 'inline'}
+		/>
 	{:else if displayItem.type === 'context_compaction'}
 		<!-- A finished reply can't still be compacting; its run was stopped first. -->
 		{#if displayItem.status !== 'in_progress' || !done}

@@ -8,7 +8,14 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
-	import { settings, selectedMachineId, showTabs, showFileNavPath, machines } from '$lib/stores';
+	import {
+		settings,
+		selectedMachineId as mainMachineId,
+		showTabs,
+		showFileNavPath,
+		machines
+	} from '$lib/stores';
+	import { getChatContext } from '$lib/components/chat/context';
 	import { downloadFileBlob, downloadFilePreview, readFile } from '$lib/apis/machines';
 	import { getFileBlobById } from '$lib/apis/files';
 	import FilePreview from '$lib/components/chat/FileNav/FilePreview.svelte';
@@ -21,6 +28,7 @@
 	export let modelId: string | null = null;
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
+	const selectedMachineId = getChatContext().selectedMachineId ?? mainMachineId;
 
 	export let expanded = true;
 	let loading = false;

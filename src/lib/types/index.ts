@@ -33,6 +33,7 @@ export type AppLayoutContext = {
 
 /** State of the chat a component is rendered in, so a side chat doesn't read the main chat's. */
 export type ChatContext = {
+	selectedMachineId?: typeof import('$lib/stores').selectedMachineId;
 	chatId: typeof import('$lib/stores').chatId;
 	models: typeof import('$lib/stores').models;
 	temporary: typeof import('$lib/stores').temporaryChat;

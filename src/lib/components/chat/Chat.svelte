@@ -222,6 +222,7 @@
 	const models = tabbed ? writable(get(_models)) : _models;
 	setChatContext({
 		chatId,
+		selectedMachineId,
 		models,
 		temporary: temporaryChat,
 		audioQueue,
